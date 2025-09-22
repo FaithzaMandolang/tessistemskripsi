@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hasil Analisis Kulit</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/result.css') }}"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Hasil Analisis</h1>
+
+      <div class="images">
+        <div>
+          <h3>Original</h3>
+          <img src="{{ original }}" alt="Gambar Original" />
+        </div>
+        <div>
+          <h3>Heatmap</h3>
+          <img src="{{ heatmap }}" alt="Heatmap Grad-CAM" />
+        </div>
+        <div>
+          <h3>Overlay</h3>
+          <img src="{{ overlay }}" alt="Overlay Grad-CAM" />
+        </div>
+      </div>
+
+      <div class="prediction">
+        <h2>Prediksi Model: {{ prediction }} ({{ confidence }})</h2>
+      </div>
+
+      {% if explanation %}
+      <div class="recommendation">
+        <h3>Penjelasan & Rekomendasi</h3>
+        <p>{{ explanation|safe }}</p>
+      </div>
+      {% endif %}
+
+      <a href="{{ url_for('index') }}">← Upload gambar lain</a>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Sistem Klasifikasi Masalah Kulit</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/index.css') }}"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <h1>Sistem Klasifikasi Masalah Kulit</h1>
+      <form action="/" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" accept="image/*" required />
+        <br />
+        <button type="submit">Upload & Klasifikasi</button>
+      </form>
+
+      {% if error %}
+      <p class="error">{{ error }}</p>
+      {% endif %}
+    </div>
+  </body>
+</html>
