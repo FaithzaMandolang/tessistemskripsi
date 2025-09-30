@@ -1,74 +1,83 @@
 body {
   font-family: Arial, sans-serif;
-  background: #f5f5f5;
-  color: #333;
+  background: #f8f9fa;
   margin: 0;
   padding: 20px;
+  color: #333;
 }
 
 .container {
-  max-width: 960px;
-  margin: auto;
+  max-width: 900px;
+  margin: 0 auto;
   background: #fff;
   padding: 20px 30px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-h1 {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-.prediction-box {
-  background: #eef6ff;
-  padding: 15px;
   border-radius: 10px;
-  margin-bottom: 20px;
-  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+h1,
+h2,
+h3 {
+  color: #222;
+  margin-top: 20px;
 }
 
 .images {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: space-around;
-  margin: 20px 0;
+  justify-content: space-between;
+  margin-top: 20px;
 }
 
-.img-card {
-  flex: 1 1 250px;
-  margin: 10px;
+.images div {
+  flex: 1;
   text-align: center;
+  margin: 0 10px;
 }
 
-.img-card img {
+.images img {
   max-width: 100%;
   border-radius: 8px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  border: 1px solid #ddd;
 }
 
-.explanation {
-  background: #f9f9f9;
-  padding: 15px;
-  border-radius: 10px;
-  margin-bottom: 20px;
-  line-height: 1.6;
+.prediction {
+  margin-top: 25px;
+  font-size: 1.2rem;
+  font-weight: bold;
+  color: #0069d9;
 }
 
-.back {
-  text-align: center;
-}
-
-.btn {
-  display: inline-block;
-  background: #007bff;
-  color: #fff;
-  padding: 10px 16px;
+.explanation,
+.recommendation {
+  margin-top: 25px;
+  padding: 15px 20px;
+  background: #f1f5f9;
+  border-left: 5px solid #0069d9;
   border-radius: 6px;
-  text-decoration: none;
-  transition: background 0.2s;
 }
 
-.btn:hover {
-  background: #0056b3;
+.explanation h3,
+.recommendation h3 {
+  margin-top: 0;
+}
+
+.explanation ul,
+.recommendation ul {
+  margin: 10px 0 10px 20px;
+}
+
+.explanation li,
+.recommendation li {
+  margin-bottom: 6px;
+}
+
+a {
+  display: inline-block;
+  margin-top: 20px;
+  text-decoration: none;
+  color: #0069d9;
+  font-weight: bold;
+}
+a:hover {
+  text-decoration: underline;
 }

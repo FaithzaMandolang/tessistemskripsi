@@ -5,7 +5,7 @@
     <title>Hasil Analisis Kulit</title>
     <link
       rel="stylesheet"
-      href="{{ url_for('static', filename='css/result.css') }}"
+      href="{{ url_for('static', filename='result.css') }}"
     />
   </head>
   <body>
@@ -32,9 +32,14 @@
       </div>
 
       {% if explanation %}
-      <div class="recommendation">
-        <h3>Penjelasan & Rekomendasi</h3>
+      <div class="explanation">
+        <h3>Penjelasan Hasil & Grad-CAM</h3>
         <p>{{ explanation|safe }}</p>
+      </div>
+      {% endif %} {% if recommendation %}
+      <div class="recommendation">
+        <h3>Rekomendasi Perawatan</h3>
+        <p>{{ recommendation|safe }}</p>
       </div>
       {% endif %}
 

@@ -6,7 +6,7 @@ from PIL import Image
 import numpy as np
 import cv2
 
-from flask import Flask, request, render_template, redirect, url_for
+from flask import Flask, request, render_template, url_for
 from werkzeug.utils import secure_filename
 
 import tensorflow as tf
@@ -15,6 +15,7 @@ from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.preprocessing import image as keras_image
 
 from dotenv import load_dotenv
+import markdown
 
 # Optional LLM client (Gemini)
 try:
@@ -24,7 +25,7 @@ except Exception:
 
 # ---------------- Config ----------------
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "resnetrms (1).h5"   # ganti nama sesuai model
+MODEL_PATH = BASE_DIR / "resnetrms (1).h5"   # ganti sesuai nama model
 UPLOAD_FOLDER = BASE_DIR / "static" / "uploads"
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
@@ -49,8 +50,8 @@ llm_client = None
 if genai is not None and GEMINI_KEY:
     try:
         genai.configure(api_key=GEMINI_KEY)
-        llm_client = genai.GenerativeModel("gemini-1.5-flash")
-        logger.info("Gemini LLM configured (gemini-1.5-flash).")
+        llm_client = genai.GenerativeModel("gemini-2.5-flash")
+        logger.info("Gemini LLM configured (gemini-2.5-flash).")
     except Exception as e:
         logger.warning(f"Failed to configure Gemini: {e}")
         llm_client = None
@@ -69,7 +70,6 @@ def allowed_file(filename: str):
     return Path(filename).suffix.lower() in ALLOWED_EXT
 
 def find_last_conv_layer(keras_model):
-    # cari Conv2D terakhir, fallback cari nama yg mengandung 'conv'
     for layer in reversed(keras_model.layers):
         if isinstance(layer, tf.keras.layers.Conv2D):
             return layer.name
@@ -79,7 +79,6 @@ def find_last_conv_layer(keras_model):
     raise ValueError("Tidak menemukan layer convolution.")
 
 def _ensure_tensor(x):
-    """Helper: bila x adalah list/tuple ambil elemen pertama; kembalikan tf.Tensor."""
     if isinstance(x, (list, tuple)):
         if len(x) == 0:
             raise ValueError("Object is empty list/tuple where tensor expected.")
@@ -87,20 +86,9 @@ def _ensure_tensor(x):
     return x
 
 def make_gradcam_overlay(keras_model, img_rgb_uint8, x_preprocessed, pred_class, alpha=0.4, layer_name=None):
-    """
-    Robust Grad-CAM:
-      - menangani kasus layer.output/grad yang returned as list/tuple
-      - mengembalikan heatmap_resized (float 0..1) dan overlay_rgb (uint8)
-    Args:
-      keras_model: model
-      img_rgb_uint8: original image RGB uint8 (H,W,3)
-      x_preprocessed: input preprocessed for model (1,H,W,3) - tf tensor or np array
-      pred_class: int index
-    """
     if layer_name is None:
         layer_name = find_last_conv_layer(keras_model)
 
-    # prepare model that outputs conv maps + predictions
     try:
         layer_output = keras_model.get_layer(layer_name).output
     except Exception as e:
@@ -108,62 +96,36 @@ def make_gradcam_overlay(keras_model, img_rgb_uint8, x_preprocessed, pred_class,
 
     grad_model = tf.keras.models.Model(keras_model.inputs, [layer_output, keras_model.output])
 
-    # convert x_preprocessed to tensor float32
-    x = tf.convert_to_tensor(x_preprocessed)
-    if x.dtype != tf.float32:
-        x = tf.cast(x, tf.float32)
+    x = tf.convert_to_tensor(x_preprocessed, dtype=tf.float32)
 
     with tf.GradientTape() as tape:
-        # forward pass
         conv_outputs, predictions = grad_model(x)
-        # ensure conv_outputs is a tensor (not list)
         conv_outputs = _ensure_tensor(conv_outputs)
         predictions = _ensure_tensor(predictions)
-        # loss: score of the target class
         loss = predictions[:, pred_class]
 
-    # compute gradients of the class output w.r.t conv layer outputs
     grads = tape.gradient(loss, conv_outputs)
     grads = _ensure_tensor(grads)
 
     if grads is None:
-        raise RuntimeError("Gradien None — tidak dapat menghitung gradien (cek model/input).")
+        raise RuntimeError("Gradien None — tidak dapat menghitung gradien.")
 
-    # pooled grads: average over spatial dims (H, W) and batch (0)
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))  # shape: (C,)
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+    conv_outputs_arr = conv_outputs[0].numpy()
+    pooled_grads_arr = pooled_grads.numpy()
 
-    # convert to numpy arrays for channel weighting
-    conv_outputs_arr = conv_outputs[0].numpy()  # shape: (H, W, C)
-    pooled_grads_arr = pooled_grads.numpy()     # shape: (C,)
-
-    # safety checks shapes
-    if conv_outputs_arr.ndim != 3:
-        raise RuntimeError(f"conv_outputs_arr harus 3D (H,W,C), tapi bentuknya: {conv_outputs_arr.shape}")
-    if pooled_grads_arr.ndim != 1:
-        raise RuntimeError(f"pooled_grads_arr harus 1D (C,), tapi bentuknya: {pooled_grads_arr.shape}")
-
-    # weight channels
-    # broadcasting multiply: safer and faster than loop
-    try:
-        weighted = conv_outputs_arr * pooled_grads_arr[np.newaxis, np.newaxis, :]
-    except Exception:
-        # fallback ke loop jika broadcasting gagal
-        for i in range(pooled_grads_arr.shape[-1]):
-            conv_outputs_arr[:, :, i] *= pooled_grads_arr[i]
-        weighted = conv_outputs_arr
+    weighted = conv_outputs_arr * pooled_grads_arr[np.newaxis, np.newaxis, :]
 
     heatmap = np.mean(weighted, axis=-1)
     heatmap = np.maximum(heatmap, 0)
     if np.max(heatmap) != 0:
         heatmap /= np.max(heatmap)
 
-    # resize heatmap ke resolusi gambar asli
     h, w = img_rgb_uint8.shape[:2]
     heatmap_resized = cv2.resize(heatmap, (w, h))
     heatmap_uint8 = np.uint8(255 * heatmap_resized)
     heatmap_color_bgr = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
 
-    # overlay: convert original RGB -> BGR, addWeighted, back to RGB
     img_bgr = cv2.cvtColor(img_rgb_uint8, cv2.COLOR_RGB2BGR)
     overlay_bgr = cv2.addWeighted(img_bgr, 1 - alpha, heatmap_color_bgr, alpha, 0)
     overlay_rgb = cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
@@ -175,32 +137,38 @@ def save_resized_for_llm(overlay_rgb_uint8, path_out: Path, max_size=OVERLAY_LLM
     pil.thumbnail((max_size, max_size))
     pil.save(str(path_out), format="JPEG", quality=85)
 
-def build_llm_prompt(pred_label: str):
+# ---------------- Prompt builders ----------------
+def build_explanation_prompt(pred_label: str):
     return f"""
-Kamu adalah asisten kecantikan yang menjelaskan hasil klasifikasi kondisi kulit wajah
-dengan cara sederhana agar mudah dipahami orang awam.
+Kamu adalah asisten kecantikan.
 
-Input:
-- Hasil prediksi model: {pred_label}
-- Visualisasi Grad-CAM overlay yang menunjukkan area wajah yang paling diperhatikan model.
+Hasil prediksi model: {pred_label}.
 
 Tugasmu:
-1. Jelaskan hasil prediksi model dengan bahasa awam, tanpa istilah medis yang rumit.
-2. Terangkan area wajah yang ditandai warna merah/oranye pada Grad-CAM overlay
-   sebagai area yang diperhatikan model.
-3. Berikan penjelasan sederhana kenapa area itu penting.
-4. Rekomendasikan **zat aktif skincare** yang sesuai untuk mengatasi masalah kulit hasil prediksi.
-5. Berikan contoh **produk skincare nyata** (brand global/umum) yang mengandung zat aktif tersebut.
+1. Jelaskan hasil prediksi model dengan bahasa sederhana agar mudah dipahami.
+2. Gunakan visualisasi Grad-CAM (overlay warna merah/oranye) untuk menjelaskan area wajah yang diperhatikan model.
+3. Terangkan kenapa area tersebut relevan dengan kondisi kulit {pred_label}.
+4. Gunakan bahasa ringan, ringkas, dan mudah dimengerti orang awam.
+"""
+
+def build_recommendation_prompt(pred_label: str):
+    return f"""
+Kamu adalah ahli skincare.
+
+Hasil prediksi model: {pred_label}.
+
+Tugasmu:
+1. Rekomendasikan **zat aktif skincare** yang sesuai untuk kondisi kulit {pred_label}.
+2. Berikan contoh **produk skincare nyata** (brand global/umum) yang mengandung zat aktif tersebut.
    - Sebutkan nama produk
-   - Sebutkan zat aktif utama di dalam produk
+   - Sebutkan zat aktif utama
    - Jelaskan singkat kenapa produk itu cocok
-6. Ingatkan bahwa ini hanyalah saran umum berbasis AI, bukan diagnosis medis atau rekomendasi dokter.
+3. Ingatkan bahwa ini hanya saran umum berbasis AI, bukan diagnosis medis.
 
 Format keluaran:
-- Paragraf singkat (penjelasan hasil & Grad-CAM).
-- Rekomendasi zat aktif (dalam bentuk daftar poin).
-- Rekomendasi produk skincare (dalam bentuk daftar poin).
-- Penutup berupa disclaimer singkat.
+- Daftar poin untuk zat aktif
+- Daftar poin untuk produk skincare
+- Penutup berupa disclaimer singkat
 """
 
 # ---------------- Flask app ----------------
@@ -224,11 +192,9 @@ def index():
         save_path = UPLOAD_FOLDER / filename
         file.save(str(save_path))
 
-        # load gambar asli untuk display (ORIGINAL, full resolution)
         img_orig = Image.open(str(save_path)).convert("RGB")
         img_orig_rgb = np.array(img_orig)
 
-        # resize untuk model (keep aspect ratio bias di sini kami gunakan simple resize)
         pil_for_model = img_orig.resize(TARGET_SIZE)
         img_array = keras_image.img_to_array(pil_for_model)
         x = np.expand_dims(img_array.copy(), axis=0)
@@ -245,7 +211,6 @@ def index():
             logger.exception("Grad-CAM gagal")
             return render_template("index.html", error=f"Grad-CAM error: {e}")
 
-        # simpan file untuk web
         orig_save = UPLOAD_FOLDER / f"{base}_orig.jpg"
         heat_save = UPLOAD_FOLDER / f"{base}_heat.jpg"
         overlay_save = UPLOAD_FOLDER / f"{base}_overlay.jpg"
@@ -259,15 +224,29 @@ def index():
         Image.fromarray(overlay_rgb).save(str(overlay_save))
         save_resized_for_llm(overlay_rgb, overlay_llm_save)
 
-        llm_text = None
+        explanation_text = None
+        recommendation_text = None
         if llm_client is not None:
             try:
-                prompt = build_llm_prompt(pred_label)
+                # Prompt 1: Penjelasan
+                prompt1 = build_explanation_prompt(pred_label)
                 img_for_llm = Image.open(str(overlay_llm_save))
-                resp = llm_client.generate_content([prompt, img_for_llm])
-                llm_text = getattr(resp, "text", None) or str(resp)
-            except Exception:
-                llm_text = "LLM gagal merespon."
+                resp1 = llm_client.generate_content([prompt1, img_for_llm])
+                explanation_text = getattr(resp1, "text", None) or str(resp1)
+
+                # Prompt 2: Rekomendasi
+                prompt2 = build_recommendation_prompt(pred_label)
+                resp2 = llm_client.generate_content(prompt2)
+                recommendation_text = getattr(resp2, "text", None) or str(resp2)
+
+                # Format agar rapi di HTML
+                import markdown
+                explanation_text = markdown.markdown(explanation_text, extensions=["extra"])
+                recommendation_text = markdown.markdown(recommendation_text, extensions=["extra"])
+
+            except Exception as e:
+                explanation_text = "LLM gagal menjelaskan prediksi."
+                recommendation_text = "LLM gagal memberi rekomendasi."
 
         return render_template(
             "result.html",
@@ -276,7 +255,8 @@ def index():
             original=url_for("static", filename=f"uploads/{orig_save.name}"),
             heatmap=url_for("static", filename=f"uploads/{heat_save.name}"),
             overlay=url_for("static", filename=f"uploads/{overlay_save.name}"),
-            explanation=llm_text
+            explanation=explanation_text,
+            recommendation=recommendation_text
         )
 
     return render_template("index.html")
